@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Portal DI · Medio Ambiente Castro</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -56,9 +57,9 @@ input:focus{border-color:var(--brand-light)}
 .upload-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:2rem;text-align:center;cursor:pointer;transition:all .2s;color:var(--text3)}
 .upload-zone:hover,.upload-zone.drag-over{border-color:var(--brand-light);background:var(--brand-bg);color:var(--brand-mid)}
 .upload-zone input{display:none}
-.upload-zone p{font-size:.88rem;margin-top:.4rem}
-.upload-zone strong{display:block;font-size:.95rem;margin-top:.5rem}
-.pitem{display:grid;grid-template-columns:1fr 130px auto;align-items:center;gap:.5rem;padding:.65rem .75rem;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:.4rem}
+.upload-zone p{font-size:.85rem;margin-top:.35rem;color:var(--text3)}
+.upload-zone strong{display:block;font-size:.95rem;margin-top:.5rem;color:var(--text2)}
+.pitem{display:grid;grid-template-columns:1fr 140px auto;align-items:center;gap:.5rem;padding:.65rem .75rem;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:.4rem}
 .pitem .fname{font-size:.82rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pitem input.cif-field{font-size:.8rem;padding:.35rem .55rem;text-transform:uppercase}
 .sbadge{font-size:.72rem;font-weight:600;padding:.2rem .6rem;border-radius:100px;white-space:nowrap}
@@ -139,7 +140,7 @@ footer a:hover{color:var(--text2)}
       <!-- TAB SUBIR -->
       <div id="tab-upload">
         <div class="card">
-          <div class="card-title">Subir PDFs — el NIF se extrae automáticamente con IA</div>
+          <div class="card-title">Subir PDFs — el NIF se lee automáticamente del contenido del documento</div>
           <div class="upload-zone" id="drop-zone"
             onclick="document.getElementById('file-input').click()"
             ondragover="event.preventDefault();this.classList.add('drag-over')"
@@ -150,7 +151,7 @@ footer a:hover{color:var(--text2)}
               <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
             </svg>
             <strong>Arrastra los PDFs aquí</strong>
-            <p>o haz clic para seleccionar · La IA detecta el NIF automáticamente</p>
+            <p>o haz clic para seleccionar · Se lee el NIF del interior del documento</p>
           </div>
           <div id="pending-list" style="margin-top:.75rem"></div>
           <div id="upload-actions" style="display:none;margin-top:.75rem">
@@ -185,14 +186,14 @@ footer a:hover{color:var(--text2)}
           <div style="display:grid;gap:.75rem;max-width:280px">
             <div><label>PIN actual</label><input type="password" id="old-pin" placeholder="PIN actual"></div>
             <div><label>Nuevo PIN</label><input type="password" id="new-pin" placeholder="Nuevo PIN"></div>
-            <div><label>Confirmar nuevo PIN</label><input type="password" id="confirm-pin" placeholder="Repite el PIN"></div>
+            <div><label>Confirmar PIN</label><input type="password" id="confirm-pin" placeholder="Repite el PIN"></div>
             <button class="btn btn-primary" onclick="changePin()" style="width:fit-content">Cambiar PIN</button>
             <div id="pin-change-msg"></div>
           </div>
         </div>
         <div class="card" style="margin-top:1rem">
           <div class="card-title">Zona de peligro</div>
-          <p style="font-size:.82rem;color:var(--text2);margin-bottom:.75rem">Elimina todos los documentos de Supabase. Esta acción no se puede deshacer.</p>
+          <p style="font-size:.82rem;color:var(--text2);margin-bottom:.75rem">Elimina todos los documentos de Supabase. No se puede deshacer.</p>
           <button class="btn btn-danger btn-sm" onclick="deleteAllDocs()">Eliminar todos los documentos</button>
         </div>
       </div>
@@ -202,163 +203,143 @@ footer a:hover{color:var(--text2)}
   <footer>
     <a href="#" onclick="showAdminView();return false">Administración</a>
     &nbsp;·&nbsp; © Medio Ambiente Castro, S.L.U.
+    &nbsp;·&nbsp; info@medioambientecastro.es
   </footer>
 </div>
 
 <script>
+// ── CONFIG ──────────────────────────────────────────────
 const SUPABASE_URL = 'https://vbtkhvotatgsrfauhcmb.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_yDzZICkrXEQ7dHHsTYIVWw_y_CAkXlb';
-const BUCKET = 'documentos-di';
-const DEFAULT_PIN = '1234';
+const BUCKET       = 'documentos-di';
+const DEFAULT_PIN  = '1234';
+// NIF de Medio Ambiente Castro — se excluye para no confundirse con el ORIGEN
+const NIF_OPERADOR = 'B81909145';
+
+// Configura worker de PDF.js
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let pendingFiles = [];
 
-/* ===== PIN ===== */
-function getPin(){ return localStorage.getItem('mac_pin') || DEFAULT_PIN; }
-function checkPin(){
-  const v = document.getElementById('pin-input').value;
-  if(v === getPin()){
-    document.getElementById('pin-overlay').style.display = 'none';
-    document.getElementById('admin-panel').style.display = 'block';
-    renderAdminDocs();
-  } else {
-    document.getElementById('pin-error').innerHTML = '<div class="msg msg-error">PIN incorrecto</div>';
+// ── EXTRACCIÓN NIF DEL PDF ───────────────────────────────
+// Lee todo el texto del PDF y busca NIFs/CIFs españoles,
+// excluyendo el NIF del operador (Medio Ambiente Castro)
+async function extractNIFFromPDF(file) {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      fullText += content.items.map(i => i.str).join(' ') + ' ';
+    }
+
+    // Busca la sección ORIGEN en el texto
+    // Los NIFs pueden ser:
+    //   Empresa:   letra + 7-8 dígitos + letra/dígito  (B84989136)
+    //   Persona:   8 dígitos + letra                   (72832514R)
+    //   NIE:       X/Y/Z + 7 dígitos + letra           (Y2063944F)
+    const nifRegex = /\b([A-Z]\d{7,8}[A-Z0-9]|\d{8}[A-Z]|[XYZ]\d{7}[A-Z])\b/g;
+
+    // Primero intentar encontrar el NIF justo después de "ORIGEN" y antes de "DESTINO"
+    const origenMatch = fullText.match(/ORIGEN[\s\S]{0,800}?N\.?I\.?F[:\s]*([A-Z0-9]{8,10})/i);
+    if (origenMatch) {
+      const nif = origenMatch[1].toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (nif !== NIF_OPERADOR && nif.length >= 8) return nif;
+    }
+
+    // Si no, recoger todos los NIFs del documento y devolver el primero que no sea el operador
+    const found = [];
+    let m;
+    while ((m = nifRegex.exec(fullText.toUpperCase())) !== null) {
+      const nif = m[1];
+      if (nif !== NIF_OPERADOR && !found.includes(nif)) found.push(nif);
+    }
+    return found.length ? found[0] : null;
+  } catch(e) {
+    console.error('Error leyendo PDF:', e);
+    return null;
   }
 }
-function changePin(){
-  const old = document.getElementById('old-pin').value;
-  const nw  = document.getElementById('new-pin').value;
-  const cf  = document.getElementById('confirm-pin').value;
-  const msg = document.getElementById('pin-change-msg');
-  if(old !== getPin()){ msg.innerHTML='<div class="msg msg-error">PIN actual incorrecto</div>'; return; }
-  if(nw !== cf){ msg.innerHTML='<div class="msg msg-error">Los nuevos PINs no coinciden</div>'; return; }
-  if(nw.length < 4){ msg.innerHTML='<div class="msg msg-error">Mínimo 4 caracteres</div>'; return; }
-  localStorage.setItem('mac_pin', nw);
-  msg.innerHTML = '<div class="msg msg-success">PIN cambiado correctamente</div>';
-  ['old-pin','new-pin','confirm-pin'].forEach(id => document.getElementById(id).value = '');
-}
 
-/* ===== VISTAS ===== */
-function showUserView(){
-  document.getElementById('user-view').style.display = 'block';
-  document.getElementById('admin-view').style.display = 'none';
-}
-function showAdminView(){
-  document.getElementById('user-view').style.display = 'none';
-  document.getElementById('admin-view').style.display = 'block';
-  document.getElementById('pin-overlay').style.display = 'block';
-  document.getElementById('admin-panel').style.display = 'none';
-  document.getElementById('pin-input').value = '';
-  document.getElementById('pin-error').innerHTML = '';
-}
-function showTab(id, el){
-  ['tab-upload','tab-manage','tab-settings'].forEach(t => document.getElementById(t).style.display = 'none');
-  document.getElementById(id).style.display = 'block';
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  if(id === 'tab-manage') renderAdminDocs();
-}
-
-/* ===== ARCHIVOS ===== */
-function handleDrop(e){
+// ── ARCHIVOS ────────────────────────────────────────────
+function handleDrop(e) {
   e.preventDefault();
   document.getElementById('drop-zone').classList.remove('drag-over');
   handleFiles(e.dataTransfer.files);
 }
-function handleFiles(files){
-  for(const f of files){
-    if(f.type === 'application/pdf' && !pendingFiles.find(p => p.file.name === f.name && p.file.size === f.size)){
+function handleFiles(files) {
+  for (const f of files) {
+    if (f.type === 'application/pdf' && !pendingFiles.find(p => p.file.name === f.name && p.file.size === f.size)) {
       pendingFiles.push({ file: f, cif: '', status: 'detecting', saved: false });
     }
   }
   renderPending();
-  pendingFiles.forEach((p, i) => { if(p.status === 'detecting') extractNIF(i); });
+  pendingFiles.forEach((p, i) => { if (p.status === 'detecting') runExtraction(i); });
 }
-function clearPending(){ pendingFiles = []; renderPending(); }
-function removePending(i){ pendingFiles.splice(i, 1); renderPending(); }
+function clearPending() { pendingFiles = []; renderPending(); }
+function removePending(i) { pendingFiles.splice(i, 1); renderPending(); }
 
-function sCls(s){ return {detecting:'st-detect',ok:'st-ok',warn:'st-warn',saved:'st-saved',error:'st-error',saving:'st-detect'}[s]||'st-warn'; }
-function sLbl(s){ return {detecting:'Detectando…',ok:'NIF detectado',warn:'Sin NIF — edita',saved:'Guardado ✓',error:'Error',saving:'Guardando…'}[s]||s; }
+async function runExtraction(idx) {
+  const nif = await extractNIFFromPDF(pendingFiles[idx].file);
+  if (nif) {
+    pendingFiles[idx].cif    = nif;
+    pendingFiles[idx].status = 'ok';
+  } else {
+    pendingFiles[idx].status = 'warn';
+  }
+  renderPending();
+}
 
-function renderPending(){
-  const list = document.getElementById('pending-list');
+function sCls(s) { return { detecting:'st-detect', ok:'st-ok', warn:'st-warn', saved:'st-saved', error:'st-error', saving:'st-detect' }[s] || 'st-warn'; }
+function sLbl(s) { return { detecting:'Leyendo PDF…', ok:'NIF detectado', warn:'Sin NIF — edita', saved:'Guardado ✓', error:'Error al subir', saving:'Guardando…' }[s] || s; }
+
+function renderPending() {
+  const list    = document.getElementById('pending-list');
   const actions = document.getElementById('upload-actions');
-  if(!pendingFiles.length){ list.innerHTML=''; actions.style.display='none'; return; }
+  if (!pendingFiles.length) { list.innerHTML = ''; actions.style.display = 'none'; return; }
   actions.style.display = 'block';
-  list.innerHTML = pendingFiles.map((p,i) => `
+  list.innerHTML = pendingFiles.map((p, i) => `
     <div class="pitem">
       <div class="fname" title="${p.file.name}">${p.file.name}</div>
       <input class="cif-field" type="text" placeholder="NIF/CIF" maxlength="12" value="${p.cif}"
-        oninput="pendingFiles[${i}].cif=this.value.toUpperCase();updateBadge(${i})"
-        ${p.saved?'disabled':''}>
+        oninput="pendingFiles[${i}].cif=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'');updateBadge(${i})"
+        ${p.saved ? 'disabled' : ''}>
       <div style="display:flex;gap:.35rem;align-items:center">
         <span id="pst-${i}" class="sbadge ${sCls(p.status)}">${sLbl(p.status)}</span>
         <button class="btn btn-secondary btn-sm" onclick="removePending(${i})" style="padding:.3rem .45rem">✕</button>
       </div>
     </div>`).join('');
 }
-function updateBadge(i){
-  const cif = pendingFiles[i].cif.trim();
-  pendingFiles[i].status = cif ? 'ok' : 'warn';
-  const el = document.getElementById('pst-'+i);
-  if(el){ el.className='sbadge '+sCls(pendingFiles[i].status); el.textContent=sLbl(pendingFiles[i].status); }
+function updateBadge(i) {
+  pendingFiles[i].status = pendingFiles[i].cif ? 'ok' : 'warn';
+  const el = document.getElementById('pst-' + i);
+  if (el) { el.className = 'sbadge ' + sCls(pendingFiles[i].status); el.textContent = sLbl(pendingFiles[i].status); }
 }
 
-/* ===== IA: EXTRACCIÓN NIF ===== */
-async function extractNIF(idx){
-  const { file } = pendingFiles[idx];
-  try {
-    const b64 = await toBase64(file);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 50,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
-            { type: 'text', text: 'Este es un Documento de Identificación de traslado de residuos español. Extrae ÚNICAMENTE el NIF/CIF del apartado ORIGEN (la tintorería generadora del residuo, NO el operador ni el transportista que es Medio Ambiente Castro). Responde SOLO con el NIF/CIF en mayúsculas, sin ningún otro texto. Ejemplo: B84989136' }
-          ]
-        }]
-      })
-    });
-    const data = await res.json();
-    const raw = (data.content && data.content[0] && data.content[0].text || '').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-    if(raw && raw.length >= 8 && raw.length <= 12){
-      pendingFiles[idx].cif = raw;
-      pendingFiles[idx].status = 'ok';
-    } else {
-      pendingFiles[idx].status = 'warn';
-    }
-  } catch(e) {
-    pendingFiles[idx].status = 'warn';
-  }
-  renderPending();
-}
-
-/* ===== GUARDAR EN SUPABASE ===== */
-async function saveAllPending(){
-  const btn = document.getElementById('btn-save');
+// ── GUARDAR EN SUPABASE ──────────────────────────────────
+async function saveAllPending() {
+  const btn      = document.getElementById('btn-save');
   const statusEl = document.getElementById('save-status');
-  btn.disabled = true;
+  btn.disabled   = true;
   let saved = 0, skipped = 0;
-  for(let i = 0; i < pendingFiles.length; i++){
+
+  for (let i = 0; i < pendingFiles.length; i++) {
     const p = pendingFiles[i];
-    if(p.saved || !p.cif){ skipped++; continue; }
+    if (p.saved || !p.cif) { skipped++; continue; }
     pendingFiles[i].status = 'saving';
     renderPending();
-    statusEl.textContent = `Subiendo ${i+1}/${pendingFiles.length}…`;
+    statusEl.textContent = `Subiendo ${i + 1}/${pendingFiles.length}…`;
     try {
-      const uid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now()+'-'+Math.random().toString(36).slice(2,7);
+      const uid  = crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2, 7);
       const path = `${p.cif}/${uid}-${p.file.name}`;
-      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, p.file, { contentType:'application/pdf', upsert:false });
-      if(upErr) throw upErr;
-      const { error: dbErr } = await sb.from('documentos').insert({ cif:p.cif, filename:p.file.name, storage_path:path, tamanio:p.file.size });
-      if(dbErr){ await sb.storage.from(BUCKET).remove([path]); throw dbErr; }
-      pendingFiles[i].saved = true;
+      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, p.file, { contentType: 'application/pdf', upsert: false });
+      if (upErr) throw upErr;
+      const { error: dbErr } = await sb.from('documentos').insert({ cif: p.cif, filename: p.file.name, storage_path: path, tamanio: p.file.size });
+      if (dbErr) { await sb.storage.from(BUCKET).remove([path]); throw dbErr; }
+      pendingFiles[i].saved  = true;
       pendingFiles[i].status = 'saved';
       saved++;
     } catch(e) {
@@ -367,8 +348,9 @@ async function saveAllPending(){
     }
     renderPending();
   }
+
   btn.disabled = false;
-  statusEl.textContent = `${saved} guardado${saved!==1?'s':''}${skipped?' · '+skipped+' omitido'+(skipped!==1?'s':''):''}`;
+  statusEl.textContent = `${saved} guardado${saved !== 1 ? 's' : ''}${skipped ? ' · ' + skipped + ' omitido' + (skipped !== 1 ? 's' : '') : ''}`;
   setTimeout(() => {
     pendingFiles = pendingFiles.filter(p => !p.saved);
     renderPending();
@@ -376,25 +358,26 @@ async function saveAllPending(){
   }, 4000);
 }
 
-/* ===== BÚSQUEDA USUARIO ===== */
-async function searchByCIF(){
-  const raw = document.getElementById('cif-input').value.trim().toUpperCase();
-  const el = document.getElementById('results');
-  if(!raw){ el.innerHTML='<div class="msg msg-error">Introduce tu NIF o CIF para buscar</div>'; return; }
+// ── BÚSQUEDA USUARIO ────────────────────────────────────
+async function searchByCIF() {
+  const raw = document.getElementById('cif-input').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const el  = document.getElementById('results');
+  if (!raw) { el.innerHTML = '<div class="msg msg-error">Introduce tu NIF o CIF para buscar</div>'; return; }
   el.innerHTML = '<div class="msg msg-info">Buscando documentos…</div>';
   try {
     const { data, error } = await sb.from('documentos').select('*').eq('cif', raw).order('fecha_subida', { ascending: false });
-    if(error) throw error;
-    if(!data || !data.length){
+    if (error) throw error;
+    if (!data || !data.length) {
       el.innerHTML = `<div class="card"><div class="empty-state">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
         <div style="font-size:.9rem;margin-bottom:.3rem">No se encontraron documentos para <strong>${raw}</strong></div>
-        <div style="font-size:.8rem">Si crees que es un error, contacta con Medio Ambiente Castro<br>info@medioambientecastro.es · 644 668 131</div>
+        <div style="font-size:.8rem">Si crees que es un error, contacta con Medio Ambiente Castro<br>
+        <a href="mailto:info@medioambientecastro.es" style="color:var(--brand-light)">info@medioambientecastro.es</a> · 644 668 131</div>
       </div></div>`;
       return;
     }
     el.innerHTML = `<div class="card">
-      <div class="card-title">${data.length} documento${data.length>1?'s':''} encontrado${data.length>1?'s':''} · ${raw}</div>
+      <div class="card-title">${data.length} documento${data.length > 1 ? 's' : ''} encontrado${data.length > 1 ? 's' : ''} · ${raw}</div>
       ${data.map(d => `
         <div class="result-item">
           <div class="doc-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-2 10H10V10h8v2zm0-4H10V6h8v2zM4 6H2v14a2 2 0 0 0 2 2h14v-2H4V6z"/></svg></div>
@@ -414,24 +397,30 @@ async function searchByCIF(){
   }
 }
 
-async function downloadDoc(path, filename){
+async function downloadDoc(path, filename) {
   const { data, error } = await sb.storage.from(BUCKET).download(path);
-  if(error){ alert('No se pudo descargar el documento. Inténtalo de nuevo.'); return; }
+  if (error) { alert('No se pudo descargar el documento.'); return; }
   const url = URL.createObjectURL(data);
-  const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+  const a   = document.createElement('a'); a.href = url; a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-/* ===== ADMIN: LISTADO ===== */
-async function renderAdminDocs(){
+// ── ADMIN: LISTADO ───────────────────────────────────────
+async function renderAdminDocs() {
   const container = document.getElementById('admin-docs-list');
-  const filter = (document.getElementById('admin-search')||{}).value || '';
+  const filter    = (document.getElementById('admin-search') || {}).value || '';
   container.innerHTML = '<div style="color:var(--text3);font-size:.82rem;padding:.5rem 0">Cargando…</div>';
-  const { data, error } = await sb.from('documentos').select('*').order('fecha_subida', { ascending:false });
-  if(error){ container.innerHTML='<div class="msg msg-error">Error al cargar documentos</div>'; return; }
-  const filtered = filter ? data.filter(d => d.cif.includes(filter.toUpperCase()) || d.filename.toLowerCase().includes(filter.toLowerCase())) : data;
-  if(!filtered.length){ container.innerHTML='<div style="color:var(--text3);font-size:.82rem;padding:1rem 0;text-align:center">No hay documentos subidos aún</div>'; return; }
-  container.innerHTML = `<div style="font-size:.78rem;color:var(--text3);margin-bottom:.5rem">${filtered.length} documento${filtered.length>1?'s':''}</div>` +
+  const { data, error } = await sb.from('documentos').select('*').order('fecha_subida', { ascending: false });
+  if (error) { container.innerHTML = '<div class="msg msg-error">Error al cargar documentos</div>'; return; }
+  const filtered = filter
+    ? data.filter(d => d.cif.includes(filter.toUpperCase()) || d.filename.toLowerCase().includes(filter.toLowerCase()))
+    : data;
+  if (!filtered.length) {
+    container.innerHTML = '<div style="color:var(--text3);font-size:.82rem;padding:1rem 0;text-align:center">No hay documentos subidos aún</div>';
+    return;
+  }
+  container.innerHTML =
+    `<div style="font-size:.78rem;color:var(--text3);margin-bottom:.5rem">${filtered.length} documento${filtered.length > 1 ? 's' : ''}</div>` +
     filtered.map(d => `
       <div class="adoc">
         <span class="cif-tag">${d.cif}</span>
@@ -441,31 +430,69 @@ async function renderAdminDocs(){
       </div>`).join('');
 }
 
-async function deleteDoc(id, path){
-  if(!confirm('¿Eliminar este documento?')) return;
+async function deleteDoc(id, path) {
+  if (!confirm('¿Eliminar este documento?')) return;
   await sb.storage.from(BUCKET).remove([path]);
   await sb.from('documentos').delete().eq('id', id);
   renderAdminDocs();
 }
-async function deleteAllDocs(){
-  if(!confirm('¿Eliminar TODOS los documentos? Esta acción no se puede deshacer.')) return;
+async function deleteAllDocs() {
+  if (!confirm('¿Eliminar TODOS los documentos? Esta acción no se puede deshacer.')) return;
   const { data } = await sb.from('documentos').select('storage_path');
-  if(data && data.length) await sb.storage.from(BUCKET).remove(data.map(d => d.storage_path));
-  await sb.from('documentos').delete().neq('id','00000000-0000-0000-0000-000000000000');
+  if (data && data.length) await sb.storage.from(BUCKET).remove(data.map(d => d.storage_path));
+  await sb.from('documentos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   renderAdminDocs();
 }
 
-/* ===== UTILS ===== */
-function toBase64(file){
-  return new Promise((res,rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result.split(',')[1]);
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
+// ── PIN ──────────────────────────────────────────────────
+function getPin() { return localStorage.getItem('mac_pin') || DEFAULT_PIN; }
+function checkPin() {
+  const v = document.getElementById('pin-input').value;
+  if (v === getPin()) {
+    document.getElementById('pin-overlay').style.display  = 'none';
+    document.getElementById('admin-panel').style.display  = 'block';
+    renderAdminDocs();
+  } else {
+    document.getElementById('pin-error').innerHTML = '<div class="msg msg-error">PIN incorrecto</div>';
+  }
 }
-function fDate(iso){ try{ return new Date(iso).toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'}); }catch{ return iso||''; } }
-function fSize(b){ if(!b) return ''; if(b<1024) return b+'B'; if(b<1048576) return Math.round(b/1024)+'KB'; return (b/1048576).toFixed(1)+'MB'; }
+function changePin() {
+  const old = document.getElementById('old-pin').value;
+  const nw  = document.getElementById('new-pin').value;
+  const cf  = document.getElementById('confirm-pin').value;
+  const msg = document.getElementById('pin-change-msg');
+  if (old !== getPin()) { msg.innerHTML = '<div class="msg msg-error">PIN actual incorrecto</div>'; return; }
+  if (nw !== cf)         { msg.innerHTML = '<div class="msg msg-error">Los nuevos PINs no coinciden</div>'; return; }
+  if (nw.length < 4)    { msg.innerHTML = '<div class="msg msg-error">Mínimo 4 caracteres</div>'; return; }
+  localStorage.setItem('mac_pin', nw);
+  msg.innerHTML = '<div class="msg msg-success">PIN cambiado correctamente</div>';
+  ['old-pin','new-pin','confirm-pin'].forEach(id => document.getElementById(id).value = '');
+}
+
+// ── VISTAS ───────────────────────────────────────────────
+function showUserView() {
+  document.getElementById('user-view').style.display  = 'block';
+  document.getElementById('admin-view').style.display = 'none';
+}
+function showAdminView() {
+  document.getElementById('user-view').style.display  = 'none';
+  document.getElementById('admin-view').style.display = 'block';
+  document.getElementById('pin-overlay').style.display  = 'block';
+  document.getElementById('admin-panel').style.display  = 'none';
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-error').innerHTML = '';
+}
+function showTab(id, el) {
+  ['tab-upload','tab-manage','tab-settings'].forEach(t => document.getElementById(t).style.display = 'none');
+  document.getElementById(id).style.display = 'block';
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  if (id === 'tab-manage') renderAdminDocs();
+}
+
+// ── UTILS ────────────────────────────────────────────────
+function fDate(iso) { try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }); } catch { return iso || ''; } }
+function fSize(b)   { if (!b) return ''; if (b < 1024) return b + 'B'; if (b < 1048576) return Math.round(b / 1024) + 'KB'; return (b / 1048576).toFixed(1) + 'MB'; }
 </script>
 </body>
 </html>
