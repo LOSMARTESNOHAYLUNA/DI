@@ -203,15 +203,15 @@ footer a:hover{color:var(--text2)}
   <footer>
     <a href="#" onclick="showAdminView();return false">Administración</a>
     &nbsp;·&nbsp; © Medio Ambiente Castro, S.L.U.
-    &nbsp;·&nbsp; info@medioambientecastro.es
+    &nbsp;·&nbsp; <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="a3cacdc5cce3cec6c7caccc2cec1cac6cdd7c6c0c2d0d7d1cc8dc6d0">[email&#160;protected]</a>
   </footer>
 </div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // ── CONFIG ──────────────────────────────────────────────
 const SUPABASE_URL = 'https://vbtkhvotatgsrfauhcmb.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_yDzZICkrXEQ7dHHsTYIVWw_y_CAkXlb';
-const BUCKET       = 'documentos-di';
+const BUCKET       = 'documentos DI';
 const DEFAULT_PIN  = '1234';
 // NIF de Medio Ambiente Castro — se excluye para no confundirse con el ORIGEN
 const NIF_OPERADOR = 'B81909145';
@@ -491,8 +491,4 @@ function showTab(id, el) {
 }
 
 // ── UTILS ────────────────────────────────────────────────
-function fDate(iso) { try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }); } catch { return iso || ''; } }
-function fSize(b)   { if (!b) return ''; if (b < 1024) return b + 'B'; if (b < 1048576) return Math.round(b / 1024) + 'KB'; return (b / 1048576).toFixed(1) + 'MB'; }
-</script>
-</body>
-</html>
+function fDate(iso) { try { return new Date(iso).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:
